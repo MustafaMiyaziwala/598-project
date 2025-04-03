@@ -117,31 +117,30 @@ public class FaceAnalysis : MonoBehaviour
             Debug.Log("Request object created");
             request.timeout = 10; // Set timeout in seconds
             
-            // Add error handling for the request
-            try
-            {
-                Debug.Log("Sending web request...");
-                yield return request.SendWebRequest();
-                Debug.Log("Request completed");
+            Debug.Log("Sending web request...");
+            yield return request.SendWebRequest();
+            Debug.Log("Request completed");
 
-                if (request.result == UnityWebRequest.Result.Success)
+            if (request.result == UnityWebRequest.Result.Success)
+            {
+                Debug.Log($"Request successful. Response: {request.downloadHandler.text}");
+                try
                 {
-                    Debug.Log($"Request successful. Response: {request.downloadHandler.text}");
                     // Call the callback with the response text
                     ApiResponse response = JsonUtility.FromJson<ApiResponse>(request.downloadHandler.text);
                     callback(response.name);
                 }
-                else
+                catch (System.Exception e)
                 {
-                    Debug.LogError($"GET request failed: {request.error} (Result: {request.result})");
-                    Debug.LogError($"Response code: {request.responseCode}");
-                    callback($"Failed: {request.error}");
+                    Debug.LogError($"Error parsing response: {e.Message}");
+                    callback($"Parse error: {e.Message}");
                 }
             }
-            catch (System.Exception e)
+            else
             {
-                Debug.LogError($"Exception during web request: {e.Message}");
-                callback($"Exception: {e.Message}");
+                Debug.LogError($"GET request failed: {request.error} (Result: {request.result})");
+                Debug.LogError($"Response code: {request.responseCode}");
+                callback($"Failed: {request.error}");
             }
         }
     }
