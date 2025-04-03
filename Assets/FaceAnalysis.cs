@@ -109,28 +109,41 @@ public class FaceAnalysis : MonoBehaviour
     /// </summary>
     public IEnumerator GetRequest(string url, System.Action<string> callback)
     {
+        Debug.Log($"Starting GET request to: {url}");
+        callback("Pre-request");
         
         using (UnityWebRequest request = UnityWebRequest.Get(url))
         {
-            Debug.LogError("Starting request");
-            callback("Pre-request");
+            Debug.Log("Request object created");
             request.timeout = 10; // Set timeout in seconds
-            yield return request.SendWebRequest();
+            
+            // Add error handling for the request
+            try
+            {
+                Debug.Log("Sending web request...");
+                yield return request.SendWebRequest();
+                Debug.Log("Request completed");
 
-            if (request.result == UnityWebRequest.Result.Success)
-            {
-                // Call the callback with the response text
-                ApiResponse response = JsonUtility.FromJson<ApiResponse>(request.downloadHandler.text);
-                callback(response.name);
+                if (request.result == UnityWebRequest.Result.Success)
+                {
+                    Debug.Log($"Request successful. Response: {request.downloadHandler.text}");
+                    // Call the callback with the response text
+                    ApiResponse response = JsonUtility.FromJson<ApiResponse>(request.downloadHandler.text);
+                    callback(response.name);
+                }
+                else
+                {
+                    Debug.LogError($"GET request failed: {request.error} (Result: {request.result})");
+                    Debug.LogError($"Response code: {request.responseCode}");
+                    callback($"Failed: {request.error}");
+                }
             }
-            else
+            catch (System.Exception e)
             {
-                Debug.LogError($"GET request failed: {request.error}");
-                callback("Failed :(");
+                Debug.LogError($"Exception during web request: {e.Message}");
+                callback($"Exception: {e.Message}");
             }
         }
-
-      
     }
 
 
