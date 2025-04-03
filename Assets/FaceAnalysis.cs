@@ -76,8 +76,8 @@ public class FaceAnalysis : MonoBehaviour
 
     private void Start()
     {
-   
-        StartCoroutine(GetRequest("http://35.2.164.171:8000/", CreateLabel));
+        // Use the new HttpClient to make the request
+        HttpClient.Instance.Get("http://35.2.164.171:8000/", CreateLabel);
     }
 
     /// <summary>
@@ -109,40 +109,10 @@ public class FaceAnalysis : MonoBehaviour
     /// </summary>
     public IEnumerator GetRequest(string url, System.Action<string> callback)
     {
-        Debug.Log($"Starting GET request to: {url}");
-        callback("Pre-request");
-        
-        using (UnityWebRequest request = UnityWebRequest.Get(url))
-        {
-            Debug.Log("Request object created");
-            request.timeout = 10; // Set timeout in seconds
-            
-            Debug.Log("Sending web request...");
-            yield return request.SendWebRequest();
-            Debug.Log("Request completed");
-
-            if (request.result == UnityWebRequest.Result.Success)
-            {
-                Debug.Log($"Request successful. Response: {request.downloadHandler.text}");
-                try
-                {
-                    // Call the callback with the response text
-                    ApiResponse response = JsonUtility.FromJson<ApiResponse>(request.downloadHandler.text);
-                    callback(response.name);
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogError($"Error parsing response: {e.Message}");
-                    callback($"Parse error: {e.Message}");
-                }
-            }
-            else
-            {
-                Debug.LogError($"GET request failed: {request.error} (Result: {request.result})");
-                Debug.LogError($"Response code: {request.responseCode}");
-                callback($"Failed: {request.error}");
-            }
-        }
+        // This method is kept for backward compatibility
+        // It now uses the HttpClient to make the request
+        HttpClient.Instance.Get(url, callback);
+        yield return null; // Return immediately since the HttpClient handles the coroutine
     }
 
 
@@ -153,35 +123,41 @@ public class FaceAnalysis : MonoBehaviour
     /// </summary>
     internal IEnumerator DetectFacesFromImage()
     {
-        WWWForm webForm = new WWWForm();
         string detectFacesEndpoint = $"{baseEndpoint}detect";
 
         // Change the image into a bytes array
         imageBytes = GetImageAsByteArray(imagePath);
-
-        using (UnityWebRequest www =
-            UnityWebRequest.Post(detectFacesEndpoint, webForm))
+        
+        // Create a custom request with the image data
+        using (UnityWebRequest www = new UnityWebRequest(detectFacesEndpoint, "POST"))
         {
             www.SetRequestHeader("Ocp-Apim-Subscription-Key", key);
             www.SetRequestHeader("Content-Type", "application/octet-stream");
-            www.uploadHandler.contentType = "application/octet-stream";
             www.uploadHandler = new UploadHandlerRaw(imageBytes);
             www.downloadHandler = new DownloadHandlerBuffer();
 
             yield return www.SendWebRequest();
-            string jsonResponse = www.downloadHandler.text;
-            Face_RootObject[] face_RootObject =
-                JsonConvert.DeserializeObject<Face_RootObject[]>(jsonResponse);
-
-            List<string> facesIdList = new List<string>();
-            // Create a list with the face Ids of faces detected in image
-            foreach (Face_RootObject faceRO in face_RootObject)
+            
+            if (www.result == UnityWebRequest.Result.Success)
             {
-                facesIdList.Add(faceRO.faceId);
-                Debug.Log($"Detected face - Id: {faceRO.faceId}");
-            }
+                string jsonResponse = www.downloadHandler.text;
+                Face_RootObject[] face_RootObject =
+                    JsonConvert.DeserializeObject<Face_RootObject[]>(jsonResponse);
 
-            StartCoroutine(IdentifyFaces(facesIdList));
+                List<string> facesIdList = new List<string>();
+                // Create a list with the face Ids of faces detected in image
+                foreach (Face_RootObject faceRO in face_RootObject)
+                {
+                    facesIdList.Add(faceRO.faceId);
+                    Debug.Log($"Detected face - Id: {faceRO.faceId}");
+                }
+
+                StartCoroutine(IdentifyFaces(facesIdList));
+            }
+            else
+            {
+                Debug.LogError($"Face detection failed: {www.error}");
+            }
         }
     }
 
@@ -213,32 +189,40 @@ public class FaceAnalysis : MonoBehaviour
 
         // Serialize to Json format
         string facesToIdentifyJson = JsonConvert.SerializeObject(facesToIdentify);
-        // Change the object into a bytes array
-        byte[] facesData = Encoding.UTF8.GetBytes(facesToIdentifyJson);
-
-        WWWForm webForm = new WWWForm();
-        string detectFacesEndpoint = $"{baseEndpoint}identify";
-
-        using (UnityWebRequest www = UnityWebRequest.Post(detectFacesEndpoint, webForm))
+        
+        string identifyEndpoint = $"{baseEndpoint}identify";
+        
+        using (UnityWebRequest www = new UnityWebRequest(identifyEndpoint, "POST"))
         {
             www.SetRequestHeader("Ocp-Apim-Subscription-Key", key);
             www.SetRequestHeader("Content-Type", "application/json");
-            www.uploadHandler.contentType = "application/json";
+            byte[] facesData = Encoding.UTF8.GetBytes(facesToIdentifyJson);
             www.uploadHandler = new UploadHandlerRaw(facesData);
             www.downloadHandler = new DownloadHandlerBuffer();
 
             yield return www.SendWebRequest();
-            string jsonResponse = www.downloadHandler.text;
-            Debug.Log($"Get Person - jsonResponse: {jsonResponse}");
-            Candidate_RootObject[] candidate_RootObject = JsonConvert.DeserializeObject<Candidate_RootObject[]>(jsonResponse);
-
-            // For each face to identify that ahs been submitted, display its candidate
-            foreach (Candidate_RootObject candidateRO in candidate_RootObject)
+            
+            if (www.result == UnityWebRequest.Result.Success)
             {
-                StartCoroutine(GetPerson(candidateRO.candidates[0].personId));
+                string jsonResponse = www.downloadHandler.text;
+                Debug.Log($"Get Person - jsonResponse: {jsonResponse}");
+                Candidate_RootObject[] candidate_RootObject = JsonConvert.DeserializeObject<Candidate_RootObject[]>(jsonResponse);
 
-                // Delay the next "GetPerson" call, so all faces candidate are displayed properly
-                yield return new WaitForSeconds(3);
+                // For each face to identify that has been submitted, display its candidate
+                foreach (Candidate_RootObject candidateRO in candidate_RootObject)
+                {
+                    if (candidateRO.candidates != null && candidateRO.candidates.Count > 0)
+                    {
+                        StartCoroutine(GetPerson(candidateRO.candidates[0].personId));
+                    }
+
+                    // Delay the next "GetPerson" call, so all faces candidate are displayed properly
+                    yield return new WaitForSeconds(3);
+                }
+            }
+            else
+            {
+                Debug.LogError($"Face identification failed: {www.error}");
             }
         }
     }
@@ -249,20 +233,31 @@ public class FaceAnalysis : MonoBehaviour
     internal IEnumerator GetPerson(string personId)
     {
         string getGroupEndpoint = $"{baseEndpoint}persongroups/{personGroupId}/persons/{personId}?";
-        WWWForm webForm = new WWWForm();
-
+        
         using (UnityWebRequest www = UnityWebRequest.Get(getGroupEndpoint))
         {
             www.SetRequestHeader("Ocp-Apim-Subscription-Key", key);
             www.downloadHandler = new DownloadHandlerBuffer();
+            
             yield return www.SendWebRequest();
-            string jsonResponse = www.downloadHandler.text;
+            
+            if (www.result == UnityWebRequest.Result.Success)
+            {
+                string jsonResponse = www.downloadHandler.text;
 
-            Debug.Log($"Get Person - jsonResponse: {jsonResponse}");
-            IdentifiedPerson_RootObject identifiedPerson_RootObject = JsonConvert.DeserializeObject<IdentifiedPerson_RootObject>(jsonResponse);
+                Debug.Log($"Get Person - jsonResponse: {jsonResponse}");
+                IdentifiedPerson_RootObject identifiedPerson_RootObject = JsonConvert.DeserializeObject<IdentifiedPerson_RootObject>(jsonResponse);
 
-            // Display the name of the person in the UI
-            labelText.text = identifiedPerson_RootObject.name;
+                // Display the name of the person in the UI
+                if (labelText != null)
+                {
+                    labelText.text = identifiedPerson_RootObject.name;
+                }
+            }
+            else
+            {
+                Debug.LogError($"Get person failed: {www.error}");
+            }
         }
     }
 
